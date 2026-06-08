@@ -21,10 +21,9 @@ const regions = {
 const regionList = Object.keys(regions);
 
 // ─── IN-MEMORY STORAGE ─────────────────────────────────────
-// drivers list (persists while server runs)
 const drivers = [];
+let driverIdCounter = 1;
 
-// user session state: { [chatId]: { state, data } }
 const sessions = {};
 
 function getSession(chatId) {
@@ -72,8 +71,8 @@ function citiesMenu(regionName) {
 function searchDrivers(region, direction) {
   const cities = regions[region] || [];
   const found = direction === "toBishkek"
-    ? drivers.filter(d => cities.includes(d.from_city) && d.to_city === "Бишкек")
-    : drivers.filter(d => d.from_city === "Бишкек" && cities.includes(d.to_city));
+    ? drivers.filter(d => cities.includes(d.from_city) && d.to_city === "Бишкек" && d.seats > 0)
+    : drivers.filter(d => d.from_city === "Бишкек" && cities.includes(d.to_city) && d.seats > 0);
 
   const label = direction === "toBishkek"
     ? `${region} → Бишкек`
@@ -95,25 +94,60 @@ function searchDrivers(region, direction) {
   Object.entries(grouped).forEach(([city, list]) => {
     msgs.push(`📌 *${city}* — ${list.length} айдоочу`);
     list.forEach(r => {
-      let card = `🚗 *АЙДООЧУ*\n\n`;
+      let card = `🚗 *АЙДООЧУ #${r.id}*\n\n`;
       card += `👤 Аты: ${r.name}\n`;
       card += `🚙 Машина: ${r.car}\n`;
       card += `🗺 Маршрут: ${r.from_city} → ${r.to_city}\n`;
       card += `🕐 Убакыт: ${r.time}\n`;
       card += `💰 Баа: ${r.price} сом\n`;
-      card += `💺 Орун: ${r.seats}\n`;
+      card += `💺 Бош орун: ${r.seats}\n`;
       card += `📞 Тел: ${r.phone}\n`;
       if (r.whatsapp && r.whatsapp !== r.phone) {
         card += `💬 WA: ${r.whatsapp}\n`;
       } else if (r.whatsapp) {
         card += `💬 WhatsApp: бар\n`;
       }
-      card += `📝 Комментарий: ${r.comment || "-"}`;
+      card += `📝 Комментарий: ${r.comment || "-"}\n`;
+      card += `\n👉 Орун алуу: *орун ${r.id}* деп жазыңыз`;
       msgs.push(card);
     });
   });
 
   return msgs;
+}
+
+// ─── BOOK SEAT (жүргүнчү тарабынан) ───────────────────────
+async function bookSeat(chatId, driverId) {
+  const driver = drivers.find(d => d.id === driverId);
+
+  if (!driver) {
+    await sendMessage(chatId, "⚠️ Айдоочу табылган жок. Номерди туура жазыңыз.");
+    return;
+  }
+
+  if (driver.seats <= 0) {
+    await sendMessage(chatId, `❌ *${driver.name}* айдоочусунда бош орун калган жок.`);
+    return;
+  }
+
+  driver.seats -= 1;
+
+  let msg = `✅ *Орун ийгиликтүү алынды!*\n\n`;
+  msg += `🚗 Айдоочу: ${driver.name}\n`;
+  msg += `🗺 Маршрут: ${driver.from_city} → ${driver.to_city}\n`;
+  msg += `🕐 Убакыт: ${driver.time}\n`;
+  msg += `💰 Баа: ${driver.price} сом\n`;
+  msg += `💺 Калган бош орун: ${driver.seats}\n`;
+  msg += `📞 Байланыш: ${driver.phone}`;
+  if (driver.whatsapp) {
+    msg += `\n💬 WhatsApp: ${driver.whatsapp}`;
+  }
+
+  await sendMessage(chatId, msg);
+
+  if (driver.seats === 0) {
+    await sendMessage(chatId, `ℹ️ Бул айдоочунун бардык орундары толуп калды.`);
+  }
 }
 
 // ─── PROCESS MESSAGE ───────────────────────────────────────
@@ -122,13 +156,50 @@ async function processMessage(chatId, text) {
   const sess = getSession(chatId);
 
   // Reset commands
-  if (["старт", "start", "баштоо", "меню", "menu", "/start", "1", "2"].includes(lower) && !sess.state) {
-    // fall through to main menu handler below
-  }
-
   if (["старт", "start", "баштоо", "меню", "menu", "/start"].includes(lower)) {
     resetSession(chatId);
     await sendMessage(chatId, MAIN_MENU);
+    return;
+  }
+
+  // ── Жүргүнчү орун алат: "орун 3" ──
+  const bookMatch = text.trim().match(/^орун\s+(\d+)$/i);
+  if (bookMatch) {
+    const driverId = parseInt(bookMatch[1]);
+    await bookSeat(chatId, driverId);
+    resetSession(chatId);
+    await sendMessage(chatId, MAIN_MENU);
+    return;
+  }
+
+  // ── Айдоочу өз постунан орун азайтат: "жүргүнчү алды" же "жүргүнчү алды 2" ──
+  const reduceMatch = text.trim().match(/^жүргүнчү алды\s*(\d+)?$/i);
+  if (reduceMatch) {
+    const count = parseInt(reduceMatch[1]) || 1;
+    const driver = drivers.find(d => d.chatId === chatId);
+
+    if (!driver) {
+      await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок.");
+      return;
+    }
+
+    if (driver.seats <= 0) {
+      await sendMessage(chatId, "❌ Постуңузда бош орун жок болуп калды.");
+      return;
+    }
+
+    const reduce = Math.min(count, driver.seats);
+    driver.seats -= reduce;
+
+    let msg = `✅ *${reduce} орун азайтылды.*\n\n`;
+    msg += `🚗 ${driver.from_city} → ${driver.to_city}\n`;
+    msg += `💺 Калган бош орун: *${driver.seats}*`;
+
+    if (driver.seats === 0) {
+      msg += `\n\nℹ️ Бардык орундар толуп калды. Постуңуз тизмеден алынды.`;
+    }
+
+    await sendMessage(chatId, msg);
     return;
   }
 
@@ -148,19 +219,18 @@ async function processMessage(chatId, text) {
     return;
   }
 
-  // ── DRIVER FLOW ──
   if (state.startsWith("d_")) {
     await handleDriver(chatId, text, sess);
     return;
   }
 
-  // ── PASSENGER FLOW ──
   if (state.startsWith("p_")) {
     await handlePassenger(chatId, text, sess);
     return;
   }
 }
 
+// ─── DRIVER FLOW ───────────────────────────────────────────
 async function handleDriver(chatId, text, sess) {
   const { state, data } = sess;
 
@@ -281,6 +351,8 @@ async function handleDriver(chatId, text, sess) {
     }
 
     const newDriver = {
+      id: driverIdCounter++,
+      chatId: chatId,              // ← айдоочунун chatId сакталат
       name: data.name,
       car: data.car,
       from_city: data.from,
@@ -289,26 +361,27 @@ async function handleDriver(chatId, text, sess) {
       price: data.price,
       phone: data.phone,
       whatsapp: data.whatsapp || null,
-      seats: data.seats,
+      seats: parseInt(data.seats),
       comment: data.comment || "-",
     };
     drivers.push(newDriver);
 
     let card = `✅ *Маалыматыңыз жазылды!*\n\n`;
-    card += `🚗 *АЙДООЧУ*\n\n`;
+    card += `🚗 *АЙДООЧУ #${newDriver.id}*\n\n`;
     card += `👤 Аты: ${newDriver.name}\n`;
     card += `🚙 Машина: ${newDriver.car}\n`;
     card += `🗺 Маршрут: ${newDriver.from_city} → ${newDriver.to_city}\n`;
     card += `🕐 Убакыт: ${newDriver.time}\n`;
     card += `💰 Баа: ${newDriver.price} сом\n`;
-    card += `💺 Орун: ${newDriver.seats}\n`;
+    card += `💺 Бош орун: ${newDriver.seats}\n`;
     card += `📞 Тел: ${newDriver.phone}\n`;
     if (newDriver.whatsapp && newDriver.whatsapp !== newDriver.phone) {
       card += `💬 WA: ${newDriver.whatsapp}\n`;
     } else if (newDriver.whatsapp) {
       card += `💬 WhatsApp: бар\n`;
     }
-    card += `📝 Комментарий: ${newDriver.comment}`;
+    card += `📝 Комментарий: ${newDriver.comment}\n\n`;
+    card += `💡 Жүргүнчү алсаңыз: *жүргүнчү алды* деп жазыңыз`;
 
     resetSession(chatId);
     await sendMessage(chatId, card);
@@ -316,6 +389,7 @@ async function handleDriver(chatId, text, sess) {
   }
 }
 
+// ─── PASSENGER FLOW ────────────────────────────────────────
 async function handlePassenger(chatId, text, sess) {
   const { state } = sess;
 
@@ -362,12 +436,10 @@ async function handlePassenger(chatId, text, sess) {
 
 // ─── WEBHOOK ───────────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
-  res.sendStatus(200); // always ack fast
+  res.sendStatus(200);
 
   try {
     const body = req.body;
-
-    // Only handle incoming text messages
     if (body.typeWebhook !== "incomingMessageReceived") return;
     if (!body.messageData || body.messageData.typeMessage !== "textMessage") return;
 
@@ -383,7 +455,6 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Health check
 app.get("/", (req, res) => res.send("Такси Бот иштеп жатат ✅"));
 
 const PORT = process.env.PORT || 3000;
