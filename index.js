@@ -108,7 +108,7 @@ function searchDrivers(region, direction) {
         card += `💬 WhatsApp: бар\n`;
       }
       card += `📝 Комментарий: ${r.comment || "-"}\n`;
-      card += `\n👉 Орун алуу: *орун ${r.id}* деп жазыңыз`;
+      card += `\n👉 *Бронь:* орунду брондоо үчүн *орун ${r.id}* деп жазыңыз`;
       msgs.push(card);
     });
   });
@@ -132,7 +132,7 @@ async function bookSeat(chatId, driverId) {
 
   driver.seats -= 1;
 
-  let msg = `✅ *Орун ийгиликтүү алынды!*\n\n`;
+  let msg = `✅ *Орун ийгиликтүү брондолду!*\n\n`;
   msg += `🚗 Айдоочу: ${driver.name}\n`;
   msg += `🗺 Маршрут: ${driver.from_city} → ${driver.to_city}\n`;
   msg += `🕐 Убакыт: ${driver.time}\n`;
@@ -145,8 +145,21 @@ async function bookSeat(chatId, driverId) {
 
   await sendMessage(chatId, msg);
 
+  // ── Айдоочуга билдирүү ──
+  let notifyMsg = `🔔 *Жаңы брондоо!*\n\n`;
+  notifyMsg += `📱 ${chatId} номериндеги жүргүнчү бош орунду брондоду.\n`;
+  notifyMsg += `🗺 Маршрут: ${driver.from_city} → ${driver.to_city}\n`;
+  notifyMsg += `💺 Калган бош орун: ${driver.seats}`;
+
   if (driver.seats === 0) {
-    await sendMessage(chatId, `ℹ️ Бул айдоочунун бардык орундары толуп калды.`);
+    notifyMsg += `\n\nℹ️ Бардык орундарыңыз толду. Постуңуз тизмеден алынды.`;
+  }
+
+  await sendMessage(driver.chatId, notifyMsg);
+
+  if (driver.seats === 0) {
+    const idx = drivers.findIndex(d => d.id === driverId);
+    if (idx !== -1) drivers.splice(idx, 1);
   }
 }
 
@@ -489,7 +502,7 @@ async function handleDriver(chatId, text, sess) {
       card += `💬 WhatsApp: бар\n`;
     }
     card += `📝 Комментарий: ${newDriver.comment}\n\n`;
-    card += `💡 Жүргүнчү алсаңыз: *жүргүнчү алдым* деп жазыңыз\n`;
+    card += `💡 Жүргүнчү алсаңыз: *жүргүнчү алды* деп жазыңыз\n`;
     card += `💡 Постуңузду башкаруу: *менин постум* деп жазыңыз`;
 
     resetSession(chatId);
