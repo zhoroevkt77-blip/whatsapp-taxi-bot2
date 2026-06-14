@@ -47,6 +47,27 @@ async function sendMessage(chatId, text) {
   }
 }
 
+// ─── SEND BUTTONS ───────────────────────────────────────────
+// text: жөнөтүлүүчү билдирүү (текст менюну дублицирлеп калтыруу үчүн)
+// buttons: [{ id: "1", text: "Айдоочумун" }, ...] — максимум 3 баскыч
+async function sendButtons(chatId, text, buttons) {
+  // Текст менюну дайыма жөнөтөбүз (Green API сунушу боюнча дубликат)
+  await sendMessage(chatId, text);
+
+  if (!buttons || !buttons.length) return;
+
+  try {
+    await axios.post(`${BASE_URL}/sendButtons/${API_TOKEN}`, {
+      chatId,
+      message: text,
+      footer: "Тандоо үчүн баскычты басыңыз",
+      buttons: buttons.map(b => ({ buttonId: b.id, buttonText: b.text })),
+    });
+  } catch (e) {
+    console.error("sendButtons error:", e.message);
+  }
+}
+
 // ─── MENUS ─────────────────────────────────────────────────
 const MAIN_MENU = `🚕 *Такси Бот KG — Кош келиңиз!*
 
@@ -66,6 +87,26 @@ function citiesMenu(regionName) {
   cities.forEach((city, i) => lines.push(`${i + 1}. ${city}`));
   return lines.join("\n");
 }
+
+const ROUTE_MENU_TEXT = "Маршрут тандаңыз:\n*1* — Бишкекке барам\n*2* — Бишкектен кетем";
+const ROUTE_BUTTONS = [
+  { id: "1", text: "Бишкекке барам" },
+  { id: "2", text: "Бишкектен кетем" },
+];
+
+async function sendRouteMenu(chatId) {
+  await sendButtons(chatId, ROUTE_MENU_TEXT, ROUTE_BUTTONS);
+}
+
+const MAIN_MENU_BUTTONS = [
+  { id: "1", text: "🚗 Айдоочумун" },
+  { id: "2", text: "🧍 Жүргүнчүмүн" },
+];
+
+async function sendMainMenu(chatId) {
+  await sendButtons(chatId, MAIN_MENU, MAIN_MENU_BUTTONS);
+}
+
 
 // ─── SEARCH DRIVERS ────────────────────────────────────────
 function searchDrivers(region, direction) {
@@ -171,7 +212,7 @@ async function processMessage(chatId, text) {
   // Reset commands
   if (["старт", "start", "баштоо", "меню", "menu", "/start"].includes(lower)) {
     resetSession(chatId);
-    await sendMessage(chatId, MAIN_MENU);
+    await sendMainMenu(chatId);
     return;
   }
 
@@ -181,7 +222,7 @@ async function processMessage(chatId, text) {
     const driverId = parseInt(bookMatch[1]);
     await bookSeat(chatId, driverId);
     resetSession(chatId);
-    await sendMessage(chatId, MAIN_MENU);
+    await sendMainMenu(chatId);
     return;
   }
 
@@ -327,9 +368,9 @@ async function processMessage(chatId, text) {
       await sendMessage(chatId, "👤 Атыңызды жазыңыз:");
     } else if (text === "2") {
       sess.state = "p_route";
-      await sendMessage(chatId, "Маршрут тандаңыз:\n*1* — Бишкекке барам\n*2* — Бишкектен кетем");
+      await sendRouteMenu(chatId);
     } else {
-      await sendMessage(chatId, MAIN_MENU);
+      await sendMainMenu(chatId);
     }
     return;
   }
@@ -357,7 +398,7 @@ async function handleDriver(chatId, text, sess) {
   } else if (state === "d_car") {
     data.car = text;
     sess.state = "d_route";
-    await sendMessage(chatId, "Маршрут тандаңыз:\n*1* — Бишкекке барам\n*2* — Бишкектен кетем");
+    await sendRouteMenu(chatId);
 
   } else if (state === "d_route") {
     if (text === "1") {
@@ -369,7 +410,7 @@ async function handleDriver(chatId, text, sess) {
       sess.state = "d_to_region";
       await sendMessage(chatId, regionsMenu());
     } else {
-      await sendMessage(chatId, "1 же 2 жазыңыз.");
+      await sendRouteMenu(chatId);
     }
 
   } else if (state === "d_from_region") {
@@ -432,7 +473,15 @@ async function handleDriver(chatId, text, sess) {
   } else if (state === "d_phone") {
     data.phone = text;
     sess.state = "d_whatsapp";
-    await sendMessage(chatId, "💬 WhatsApp номериңиз барбы?\n*1* — Ооба (телефон менен бирдей)\n*2* — Ооба (башка номер)\n*3* — Жок");
+    await sendButtons(
+      chatId,
+      "💬 WhatsApp номериңиз барбы?\n*1* — Ооба (телефон менен бирдей)\n*2* — Ооба (башка номер)\n*3* — Жок",
+      [
+        { id: "1", text: "Ооба, эле эле" },
+        { id: "2", text: "Ооба, башка номер" },
+        { id: "3", text: "Жок" },
+      ]
+    );
 
   } else if (state === "d_whatsapp") {
     if (text === "1") {
@@ -461,7 +510,7 @@ async function handleDriver(chatId, text, sess) {
     if (missing) {
       await sendMessage(chatId, "⚠️ Маалымат жетишсиз. Кайрадан баштаңыз.");
       resetSession(chatId);
-      await sendMessage(chatId, MAIN_MENU);
+      await sendMainMenu(chatId);
       return;
     }
 
@@ -507,7 +556,7 @@ async function handleDriver(chatId, text, sess) {
 
     resetSession(chatId);
     await sendMessage(chatId, card);
-    await sendMessage(chatId, MAIN_MENU);
+    await sendMainMenu(chatId);
   }
 }
 
@@ -523,7 +572,7 @@ async function handlePassenger(chatId, text, sess) {
       sess.state = "p_from_region";
       await sendMessage(chatId, regionsMenu());
     } else {
-      await sendMessage(chatId, "1 же 2 жазыңыз.");
+      await sendRouteMenu(chatId);
     }
 
   } else if (state === "p_to_region") {
@@ -538,7 +587,7 @@ async function handlePassenger(chatId, text, sess) {
     for (const msg of results) {
       await sendMessage(chatId, msg);
     }
-    await sendMessage(chatId, MAIN_MENU);
+    await sendMainMenu(chatId);
 
   } else if (state === "p_from_region") {
     const idx = parseInt(text) - 1;
@@ -552,7 +601,7 @@ async function handlePassenger(chatId, text, sess) {
     for (const msg of results) {
       await sendMessage(chatId, msg);
     }
-    await sendMessage(chatId, MAIN_MENU);
+    await sendMainMenu(chatId);
   }
 }
 
