@@ -172,16 +172,64 @@ async function processMessage(chatId, text) {
     return;
   }
 
-  // ── Айдоочу өз постунан орун азайтат: "жүргүнчү алды" же "жүргүнчү алды 2" ──
-  const reduceMatch = text.trim().match(/^жүргүнчү алды\s*(\d+)?$/i);
-  if (reduceMatch) {
-    const count = parseInt(reduceMatch[1]) || 1;
+  // ── Айдоочу өз постун башкарат ──
+  // "менин постум" — учурдагы постту көрсөтүү жана буйрук тизмеси
+  if (["менин постум", "менин пост", "постум"].includes(lower)) {
     const driver = drivers.find(d => d.chatId === chatId);
-
     if (!driver) {
       await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок.");
       return;
     }
+
+    let msg = `🚗 *СИЗДИН ПОСТ #${driver.id}*\n\n`;
+    msg += `🗺 Маршрут: ${driver.from_city} → ${driver.to_city}\n`;
+    msg += `🕐 Убакыт: ${driver.time}\n`;
+    msg += `💰 Баа: ${driver.price} сом\n`;
+    msg += `💺 Бош орун: ${driver.seats}\n\n`;
+    msg += `*Буйруктар:*\n`;
+    msg += `• *жүргүнчү алды* — 1 орунду азайтат\n`;
+    msg += `• *жүргүнчү алды 2* — 2 орунду азайтат\n`;
+    msg += `• *орунду көбөйт 1* — 1 орунду кошот\n`;
+    msg += `• *орун коюу 4* — бош орунду 4кө коёт\n`;
+    msg += `• *постту өчүр* — постуңузду толугу менен өчүрөт`;
+
+    await sendMessage(chatId, msg);
+    return;
+  }
+
+  // ── Постту толугу менен өчүрүү: "постту өчүр" ──
+  if (["постту өчүр", "пост өчүр", "өчүр", "посттун өчүрүү"].includes(lower)) {
+    const idx = drivers.findIndex(d => d.chatId === chatId);
+
+    if (idx === -1) {
+      await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок.");
+      return;
+    }
+
+    const removed = drivers[idx];
+    drivers.splice(idx, 1);
+
+    let msg = `🗑 *Постуңуз өчүрүлдү.*\n\n`;
+    msg += `🗺 Маршрут: ${removed.from_city} → ${removed.to_city}\n`;
+    msg += `🕐 Убакыт: ${removed.time}\n\n`;
+    msg += `Жаңы пост кошуу үчүн *меню* деп жазыңыз.`;
+
+    await sendMessage(chatId, msg);
+    return;
+  }
+
+  // ── Айдоочу өз постунан орун азайтат: "жүргүнчү алды" же "жүргүнчү алды 2" ──
+  const reduceMatch = text.trim().match(/^жүргүнчү алды\s*(\d+)?$/i);
+  if (reduceMatch) {
+    const count = parseInt(reduceMatch[1]) || 1;
+    const idx = drivers.findIndex(d => d.chatId === chatId);
+
+    if (idx === -1) {
+      await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок.");
+      return;
+    }
+
+    const driver = drivers[idx];
 
     if (driver.seats <= 0) {
       await sendMessage(chatId, "❌ Постуңузда бош орун жок болуп калды.");
@@ -197,6 +245,60 @@ async function processMessage(chatId, text) {
 
     if (driver.seats === 0) {
       msg += `\n\nℹ️ Бардык орундар толуп калды. Постуңуз тизмеден алынды.`;
+      drivers.splice(idx, 1);
+    }
+
+    await sendMessage(chatId, msg);
+    return;
+  }
+
+  // ── Айдоочу орун көбөйтөт: "орунду көбөйт 2" же "орунду көбөйт" ──
+  const increaseMatch = text.trim().match(/^орунду\s+көбөйт\s*(\d+)?$/i);
+  if (increaseMatch) {
+    const count = parseInt(increaseMatch[1]) || 1;
+    const driver = drivers.find(d => d.chatId === chatId);
+
+    if (!driver) {
+      await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок. Эгер постуңуз толгондуктан тизмеден алынган болсо, жаңы пост кошуңуз.");
+      return;
+    }
+
+    driver.seats += count;
+
+    let msg = `✅ *${count} орун кошулду.*\n\n`;
+    msg += `🚗 ${driver.from_city} → ${driver.to_city}\n`;
+    msg += `💺 Жаңы бош орун: *${driver.seats}*`;
+
+    await sendMessage(chatId, msg);
+    return;
+  }
+
+  // ── Айдоочу бош орунду тагы санга коёт: "орун коюу 3" же "орунду 3 кылып кой" ──
+  const setMatch = text.trim().match(/^орун(?:ду)?\s+(?:коюу|кой)\s*(\d+)$/i) || text.trim().match(/^орунду\s+(\d+)\s+кылып\s+кой$/i);
+  if (setMatch) {
+    const newSeats = parseInt(setMatch[1]);
+
+    if (isNaN(newSeats) || newSeats < 0 || newSeats > 7) {
+      await sendMessage(chatId, "⚠️ Орун саны 0дөн 7гө чейин болушу керек.");
+      return;
+    }
+
+    const idx = drivers.findIndex(d => d.chatId === chatId);
+    if (idx === -1) {
+      await sendMessage(chatId, "⚠️ Сизде катталган пост табылган жок. Эгер постуңуз толгондуктан тизмеден алынган болсо, жаңы пост кошуңуз.");
+      return;
+    }
+
+    const driver = drivers[idx];
+    driver.seats = newSeats;
+
+    let msg = `✅ *Бош орун саны жаңыланды.*\n\n`;
+    msg += `🚗 ${driver.from_city} → ${driver.to_city}\n`;
+    msg += `💺 Бош орун: *${driver.seats}*`;
+
+    if (driver.seats === 0) {
+      msg += `\n\nℹ️ Бардык орундар толуп калды. Постуңуз тизмеден алынды.`;
+      drivers.splice(idx, 1);
     }
 
     await sendMessage(chatId, msg);
@@ -350,6 +452,12 @@ async function handleDriver(chatId, text, sess) {
       return;
     }
 
+    // Эгер айдоочунун мурунку посту бар болсо, аны алмаштырабыз
+    const existingIdx = drivers.findIndex(d => d.chatId === chatId);
+    if (existingIdx !== -1) {
+      drivers.splice(existingIdx, 1);
+    }
+
     const newDriver = {
       id: driverIdCounter++,
       chatId: chatId,              // ← айдоочунун chatId сакталат
@@ -381,7 +489,8 @@ async function handleDriver(chatId, text, sess) {
       card += `💬 WhatsApp: бар\n`;
     }
     card += `📝 Комментарий: ${newDriver.comment}\n\n`;
-    card += `💡 Жүргүнчү алсаңыз: *жүргүнчү алды* деп жазыңыз`;
+    card += `💡 Жүргүнчү алсаңыз: *жүргүнчү алдым* деп жазыңыз\n`;
+    card += `💡 Постуңузду башкаруу: *менин постум* деп жазыңыз`;
 
     resetSession(chatId);
     await sendMessage(chatId, card);
